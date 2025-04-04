@@ -5,23 +5,38 @@ const historyEl = document.getElementById('history');
 const addressInput = document.getElementById('address');
 const searchInput = document.getElementById('search');
 const welcomePanel = document.getElementById('welcome-panel');
+const contentFrame = document.getElementById('content-frame'); // Reference to content window/frame
 let tabCount = 0;
 let tabRefs = [];
 let currentTabIndex = -1;
+let tabUrls = []; // Store URLs for each tab
 
 function updateWelcomePanel() {
   welcomePanel.style.display = tabRefs.length === 0 ? 'block' : 'none';
+  if (tabRefs.length === 0) {
+    // Hide the content frame when no tabs are open
+    if (contentFrame) contentFrame.style.display = 'none';
+  } else {
+    // Show the content frame when tabs are open
+    if (contentFrame) contentFrame.style.display = 'block';
+  }
 }
 
 function newTab() {
   const url = "ghostshell://start";
   const index = tabCount;
-
+  
   window.ghostshell.newTab(url).then(() => {
     addTabUI(index, url);
     window.ghostshell.switchTab(index);
     setActiveTab(index);
     updateWelcomePanel();
+    
+    // Store the URL for this tab
+    tabUrls[index] = url;
+    
+    // Update address bar
+    addressInput.value = url !== "ghostshell://start" ? url : '';
   });
 }
 
@@ -31,7 +46,10 @@ function navigateTo(rawInput) {
   const url = raw.startsWith("http") ? raw : `https://${raw}`;
 
   if (currentTabIndex !== -1 && tabRefs[currentTabIndex]) {
-    window.ghostshell.newTab(url); // reuse handler to load in active tab
+    // Update the URL in our tracking array
+    tabUrls[currentTabIndex] = url;
+    // Navigate the current tab
+    window.ghostshell.navigateCurrentTab(url);
   } else {
     newTab(); // fallback to a new tab if none is active
   }
@@ -44,6 +62,7 @@ function addTabUI(index, url) {
   tab.className = 'tab';
   tab.draggable = true;
   tab.dataset.index = index;
+  tab.dataset.url = url; // Store URL in the data attribute
   tab.title = url;
 
   const favicon = document.createElement('img');
@@ -62,8 +81,17 @@ function addTabUI(index, url) {
     window.ghostshell.closeTab(index);
     tab.remove();
     tabRefs = tabRefs.filter(t => t !== tab);
-    tabCount--;
-    currentTabIndex = tabRefs.length > 0 ? tabRefs.length - 1 : -1;
+    tabUrls[index] = null; // Clear the URL for this tab
+    
+    // If we close the current tab, update the current tab index
+    if (currentTabIndex === index) {
+      currentTabIndex = tabRefs.length > 0 ? tabRefs.length - 1 : -1;
+      if (currentTabIndex >= 0) {
+        window.ghostshell.switchTab(currentTabIndex);
+        setActiveTab(currentTabIndex);
+      }
+    }
+    
     updateWelcomePanel();
   };
   tab.appendChild(close);
@@ -71,7 +99,14 @@ function addTabUI(index, url) {
   tab.onclick = () => {
     window.ghostshell.switchTab(index);
     setActiveTab(index);
-    currentTabIndex = index;
+    
+    // Update the address bar to match the selected tab's URL
+    if (tabUrls[index]) {
+      addressInput.value = tabUrls[index] !== "ghostshell://start" ? tabUrls[index] : '';
+    }
+    
+    // This will tell the main process to update the content window
+    window.ghostshell.updateContentWindow(index);
   };
 
   tab.oncontextmenu = (e) => {
@@ -100,14 +135,25 @@ function addTabUI(index, url) {
   tabRefs.push(tab);
   tabCount++;
   currentTabIndex = index;
+  
+  // Store the URL for this tab
+  tabUrls[index] = url;
 }
 
 function reorderTabElements(from, to) {
+  // Reorder the tabs array
   const moving = tabRefs.splice(from, 1)[0];
   tabRefs.splice(to, 0, moving);
+  
+  // Also reorder the URLs array to keep them in sync
+  const movingUrl = tabUrls.splice(from, 1)[0];
+  tabUrls.splice(to, 0, movingUrl);
+  
   tabsEl.innerHTML = '';
-  tabRefs.forEach(tab => tabsEl.appendChild(tab));
-  tabRefs.forEach((tab, i) => tab.dataset.index = i);
+  tabRefs.forEach((tab, i) => {
+    tab.dataset.index = i;
+    tabsEl.appendChild(tab);
+  });
 }
 
 function setActiveTab(index) {
@@ -115,8 +161,33 @@ function setActiveTab(index) {
   if (tabRefs[index]) {
     tabRefs[index].classList.add('active');
     currentTabIndex = index;
+    
+    // Update the address bar with the current tab's URL
+    if (tabUrls[index]) {
+      addressInput.value = tabUrls[index] !== "ghostshell://start" ? tabUrls[index] : '';
+    }
+    
+    // Make sure the content frame is visible
+    if (contentFrame) contentFrame.style.display = 'block';
   }
 }
+
+// Handler for URL updates from the backend
+window.ghostshell.onUrlChanged = (index, newUrl) => {
+  // Update our stored URL
+  tabUrls[index] = newUrl;
+  
+  // If this is the current tab, update the address bar
+  if (index === currentTabIndex) {
+    addressInput.value = newUrl !== "ghostshell://start" ? newUrl : '';
+  }
+  
+  // Update the tab title/tooltip
+  if (tabRefs[index]) {
+    tabRefs[index].title = newUrl;
+    tabRefs[index].dataset.url = newUrl;
+  }
+};
 
 function toggleBookmarks() {
   bookmarksEl.style.display = bookmarksEl.style.display === 'none' ? 'block' : 'none';
@@ -129,11 +200,12 @@ function toggleHistory() {
 }
 
 function bookmarkCurrent() {
-  const raw = addressInput.value.trim();
-  if (!raw) return;
-  const url = raw.startsWith('http') ? raw : 'https://' + raw;
-  const title = url;
-  window.ghostshell.addBookmark({ title, url }).then(() => loadBookmarks());
+  // Use the current tab's URL for bookmarking
+  if (currentTabIndex !== -1 && tabUrls[currentTabIndex]) {
+    const url = tabUrls[currentTabIndex];
+    const title = url;
+    window.ghostshell.addBookmark({ title, url }).then(() => loadBookmarks());
+  }
 }
 
 async function loadBookmarks() {
@@ -145,7 +217,7 @@ async function loadBookmarks() {
   }
   bookmarks.forEach(b => {
     const item = document.createElement('div');
-    item.innerHTML = `<a href="#" onclick="window.ghostshell.newTab('${b.url}')">${b.title}</a>`;
+    item.innerHTML = `<a href="#" onclick="navigateTo('${b.url}'); return false;">${b.title}</a>`;
     bookmarksEl.appendChild(item);
   });
 }
@@ -170,7 +242,7 @@ async function loadHistory() {
 
   filtered.forEach(h => {
     const item = document.createElement('div');
-    item.innerHTML = `<a href="#" onclick="window.ghostshell.newTab('${h.url}')">${h.url}</a> <small> - ${new Date(h.date).toLocaleString()}</small>`;
+    item.innerHTML = `<a href="#" onclick="navigateTo('${h.url}'); return false;">${h.url}</a> <small> - ${new Date(h.date).toLocaleString()}</small>`;
     historyEl.appendChild(item);
   });
 }
@@ -181,6 +253,7 @@ window.toggleBookmarks = toggleBookmarks;
 window.bookmarkCurrent = bookmarkCurrent;
 window.toggleHistory = toggleHistory;
 window.newTab = newTab;
+window.navigateTo = navigateTo;
 
 window.onload = () => {
   addressInput.addEventListener('keydown', e => {

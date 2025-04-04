@@ -1,0 +1,79 @@
+# GhostShell Browser - Tab Switching Implementation Changes
+
+## 1. renderer.js Changes
+
+1. **URL Tracking System**
+   - Added `tabUrls` array to store and track URLs for each tab
+   - Updated URL handling throughout tab lifecycle (creation, switching, navigation)
+
+2. **Content Frame Management**
+   - Added reference to content frame element
+   - Implemented toggle logic to show/hide based on tab state
+
+3. **Tab Switching Logic**
+   - Added `window.ghostshell.updateContentWindow(index)` call when switching tabs
+   - Updated address bar to display current tab's URL when switching
+
+4. **URL Synchronization**
+   - Implemented `onUrlChanged` event handler to keep UI in sync with backend URL changes
+   - Updates tab titles, URL storage, and address bar when URLs change
+
+5. **Navigation Improvements**
+   - Fixed `navigateTo` function to properly handle navigation in current tab
+   - Updated bookmark and history links to use direct navigation
+
+6. **Tab Close Logic**
+   - Improved tab closing to properly select another tab when current one is closed
+   - Updated tab indices management when tabs are closed
+
+7. **Bookmark & History Updates**
+   - Modified bookmark function to use current tab's URL
+   - Updated history and bookmark click handlers to use proper navigation
+
+8. **Window Exports**
+   - Exposed `navigateTo` function to window for use in history/bookmark links
+
+## 2. main.js Changes
+
+1. **URL Change Notification**
+   - Added `mainWindow.webContents.send('url-changed', index, newUrl)` to notify renderer of URL changes
+   - Added listeners for both regular navigation and in-page navigation events
+
+2. **Enhanced Tab Functions**
+   - Modified `createTab` to return the tab index
+   - Updated `switchTab` to return the current URL
+   - Added `updateContentWindow` function to explicitly update content window when switching tabs
+
+3. **New IPC Handlers**
+   - Added `update-content-window` IPC handler
+   - Added `get-tab-url` IPC handler to fetch URL for any tab
+
+4. **Improved Content Window Management**
+   - Added proper size handling for content windows during tab operations
+   - Implemented window resize event handler
+
+5. **Context Menu Enhancements**
+   - Added "View Page Source" option to tab context menu
+   - Improved error handling in context menu actions
+
+6. **Return Values**
+   - Modified functions to return meaningful values to renderer
+   - Added success/failure indicators for operations
+
+7. **Error Handling**
+   - Added better validation for tab operations
+   - Improved error handling throughout tab lifecycle
+
+## 3. preload.js Changes
+
+1. **New Exposed Functions**
+   - Added `updateContentWindow` to request content window updates
+   - Added `getTabUrl` to fetch the URL for any tab
+
+2. **Event Communication**
+   - Implemented `onUrlChanged` callback system
+   - Added IPC event management for URL change synchronization
+
+3. **IPC Bridge Updates**
+   - Added new IPC bridges for the added functionality
+   - Updated existing bridges to handle return values
